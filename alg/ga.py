@@ -25,9 +25,11 @@ class GAConfig:
     w_dist: float = 1.0
     w_time: float = 0.8
     w_stops: float = 10.0
-    w_late: float = 400.0
+    w_late: float = 2000.0
     w_loadviol: float = 400.0
     w_battviol: float = 2000.0
+    w_unserved: float = 10000.0
+
 
 
 # ----------------------------
@@ -49,28 +51,74 @@ def _random_individual(inst: Instance, rng: random.Random) -> Individual:
     return perm
 
 
+from core.energy_time import dist_km, travel_time_min
+
 def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
     """
-    Simple, SAFE decoder:
-    - Split permutation into `bikes` contiguous chunks (balanced counts).
-    - Guarantees every customer served exactly once.
-    You can later replace with a smarter split (load-aware, time-window-aware, etc.).
+    Time-window-aware greedy assignment.
+    Assign each next customer to the bike that minimizes:
+      - predicted lateness (strong penalty)
+      - then route time/travel time
+    This typically cuts late_count a LOT compared to travel-time-only splitting.
     """
-    n = len(perm)
     if bikes <= 0:
         raise ValueError("bikes must be >= 1")
 
     routes: Routes = [[] for _ in range(bikes)]
-    # balanced chunk sizes
-    base = n // bikes
-    rem = n % bikes
-    idx = 0
-    for b in range(bikes):
-        size = base + (1 if b < rem else 0)
-        routes[b] = perm[idx: idx + size]
-        idx += size
-    return routes
+    cur = [inst.depot_id for _ in range(bikes)]
+    t_now = [0.0 for _ in range(bikes)]   # simulated time at current position (minutes)
 
+    LATE_W = 200.0   # strong penalty weight (tune 100..500)
+    WAIT_W = 0.2     # small weight for waiting (avoid too-early arrivals)
+
+    for cust in perm:
+        node = inst.nodes[cust]
+
+        best_b = 0
+        best_score = float("inf")
+
+        for b in range(bikes):
+            d = dist_km(inst, cur[b], cust)
+            t_travel = travel_time_min(inst, d)
+
+            arrival = t_now[b] + t_travel
+
+            # waiting if early
+            wait = 0.0
+            if arrival < node.tw_earliest:
+                wait = node.tw_earliest - arrival
+                arrival = node.tw_earliest
+
+            # lateness if late
+            late = 0.0
+            if arrival > node.tw_latest:
+                late = arrival - node.tw_latest
+
+            # after service
+            finish = arrival + node.service_time
+
+            # scoring: prioritize reducing lateness
+            score = finish + WAIT_W * wait + LATE_W * late
+
+            if score < best_score:
+                best_score = score
+                best_b = b
+
+        # assign to best bike
+        routes[best_b].append(cust)
+
+        # update that bike state
+        d = dist_km(inst, cur[best_b], cust)
+        t_travel = travel_time_min(inst, d)
+
+        arrival = t_now[best_b] + t_travel
+        if arrival < node.tw_earliest:
+            arrival = node.tw_earliest
+
+        t_now[best_b] = arrival + node.service_time
+        cur[best_b] = cust
+
+    return routes
 
 def _assert_valid_perm(inst: Instance, perm: Individual) -> None:
     reqs = set(inst.request_ids)
@@ -96,6 +144,7 @@ def _fitness(inst: Instance, perm: Individual, cfg: GAConfig) -> float:
         cfg.w_late * sim.late_count +
         cfg.w_loadviol * sim.load_violations +
         cfg.w_battviol * sim.battery_violations
+        + cfg.w_unserved * sim.unserved
     )
 
 

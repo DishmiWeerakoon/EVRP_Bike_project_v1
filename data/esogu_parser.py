@@ -16,11 +16,11 @@ class Node:
 
 @dataclass(frozen=True)
 class Params:
-    v_mps: float = 12.5
+    v_mps: float = 6.0
     load_cap_kg: float = 350.0
-    battery_kwh: float = 1.0
-    consumption_rate: float = 1.0
-    recharge_rate: float = 0.18
+    battery_kwh: float = 0.6
+    consumption_rate = 0.03  # example: 20 Wh/km
+    recharge_rate: float = 0.5
 
 @dataclass
 class Instance:
@@ -52,6 +52,17 @@ def parse_esogu_txt(path: str) -> Dict[str, Node]:
         st = float(parts[6])
         tw_e = float(parts[7])
         tw_l = float(parts[8])
+
+        # service_time is likely in seconds -> convert to minutes
+        # (100..14400 in your debug makes sense as seconds)
+        st = st / 60.0
+
+        # ✅ Convert to minutes if dataset is in hours-like scale
+        # Heuristic: if tw_latest is small (<= 200), it's not minutes
+        if tw_l <= 200:
+            st *= 60.0
+            tw_e *= 60.0
+            tw_l *= 60.0
 
         nodes[nid] = Node(nid, ntype, lat, lon, D, P, st, tw_e, tw_l)
 

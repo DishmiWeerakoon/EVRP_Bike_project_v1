@@ -329,6 +329,7 @@ def to_row(instance_label: str, method: str, sim):
         "late_count": sim.late_count,
         "load_violations": sim.load_violations,
         "battery_violations": sim.battery_violations,
+        "unserved": sim.unserved,
     }
 
 
@@ -340,11 +341,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [60]   # adjust if you want more
+    sizes = [100]   # adjust if you want more
     tws = [1]
     types = ["C", "R", "RC"]
 
-    bikes = 3
+    bikes = 5
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
@@ -360,6 +361,18 @@ def main():
                 label = f"{typ}{n}_TW{tw}"
 
                 inst = build_instance(txt_path, excel_path)
+
+                # ---- TIME SCALE DEBUG ----
+                tw_e = [inst.nodes[r].tw_earliest for r in inst.request_ids]
+                tw_l = [inst.nodes[r].tw_latest for r in inst.request_ids]
+                st   = [inst.nodes[r].service_time for r in inst.request_ids]
+
+                print("TW earliest min/max:", min(tw_e), max(tw_e))
+                print("TW latest   min/max:", min(tw_l), max(tw_l))
+                print("service_time min/max:", min(st), max(st))
+                print("v_mps:", inst.params.v_mps)
+                # --------------------------
+
 
                 print(label, len(inst.request_ids), len(inst.charging_ids), len(inst.dist))
                 print("req sample:", inst.request_ids[:5])
@@ -398,7 +411,7 @@ def main():
     fieldnames = [
         "instance", "method", "feasible",
         "total_dist_km", "total_time_min", "travel_time_min", "charge_time_min",
-        "charge_stops", "late_count", "load_violations", "battery_violations"
+        "charge_stops", "late_count", "load_violations", "battery_violations", "unserved"
     ]
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:

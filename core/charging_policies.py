@@ -5,10 +5,11 @@ from core.energy_time import dist_km, travel_time_min, energy_need_kwh
 
 
 def charge_time_min(inst: Instance, energy_added_kwh: float) -> float:
-    g = inst.params.recharge_rate
-    if g <= 0:
+    kw = inst.params.recharge_rate
+    if kw <= 0:
         return 1e9
-    return energy_added_kwh / g
+    hours = energy_added_kwh / kw
+    return hours * 60.0
 
 
 def nearest_station(inst: Instance, from_id: str) -> str:

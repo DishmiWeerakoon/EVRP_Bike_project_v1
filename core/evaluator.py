@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List
+from typing import List, Set
 from data.esogu_parser import Instance
 from core.energy_time import dist_km, travel_time_min, energy_need_kwh
 from core.charging_policies import maybe_charge
@@ -17,12 +17,13 @@ class SimResult:
     late_count: int
     load_violations: int
     battery_violations: int
+    unserved: int                 # ✅ NEW
 
 
 def simulate_plan(
     inst: Instance,
     bike_routes: List[List[str]],
-    charging_policy: str = "dynamic",     # "dynamic" | "full" | "fixed"
+    charging_policy: str = "dynamic",
     fixed_target_soc: float = 0.80
 ) -> SimResult:
     depot = inst.depot_id
@@ -37,6 +38,8 @@ def simulate_plan(
     load_viol = 0
     batt_viol = 0
 
+    served: Set[str] = set()      # ✅ track served customers
+
     for route in bike_routes:
         seq = route[:]
         if not seq or seq[0] != depot:
@@ -44,7 +47,7 @@ def simulate_plan(
         if seq[-1] != depot:
             seq = seq + [depot]
 
-        # simple load check
+        # simple load check (per bike route)
         load = 0.0
         for nid in seq:
             n = inst.nodes[nid]
@@ -54,7 +57,7 @@ def simulate_plan(
             load_viol += 1
 
         t = 0.0
-        soc = inst.params.battery_kwh
+        soc_kwh = inst.params.battery_kwh   # current available energy (kWh)
         cur = seq[0]
 
         for i in range(1, len(seq)):
@@ -62,16 +65,17 @@ def simulate_plan(
             remaining = seq[i:]  # nxt..end
 
             # charging step (policy-based)
-            new_cur, soc, t_detour, t_charge, d_detour, did_charge, bv = maybe_charge(
+            new_cur, soc_kwh, t_detour, t_charge, d_detour, did_charge, bv = maybe_charge(
                 inst,
                 current_id=cur,
-                soc_kwh=soc,
+                soc_kwh=soc_kwh,
                 remaining_route=remaining,
                 policy=charging_policy,
                 fixed_target_soc=fixed_target_soc,
                 reserve_kwh=0.05,
             )
 
+            # If charging policy says "battery violation / impossible", stop this bike
             if bv:
                 batt_viol += 1
                 break
@@ -88,11 +92,12 @@ def simulate_plan(
             # travel cur -> nxt
             d = dist_km(inst, cur, nxt)
             e = energy_need_kwh(inst, d)
-            if soc < e:
+
+            if soc_kwh < e:
                 batt_viol += 1
                 break
 
-            soc -= e
+            soc_kwh -= e
             t_leg = travel_time_min(inst, d)
 
             total_dist += d
@@ -102,6 +107,9 @@ def simulate_plan(
 
             node = inst.nodes[nxt]
             if node.node_type == "c":
+                # ✅ mark served
+                served.add(nxt)
+
                 # waiting
                 if t < node.tw_earliest:
                     wait = node.tw_earliest - t
@@ -118,7 +126,11 @@ def simulate_plan(
 
             cur = nxt
 
-    feasible = (late_count == 0 and load_viol == 0 and batt_viol == 0)
+    # ✅ NEW: count unserved customers (core bug fix)
+    total_customers = len(inst.request_ids)
+    unserved = total_customers - len(served)
+
+    feasible = (late_count == 0 and load_viol == 0 and batt_viol == 0 and unserved == 0)
 
     return SimResult(
         feasible=feasible,
@@ -130,4 +142,5 @@ def simulate_plan(
         late_count=late_count,
         load_violations=load_viol,
         battery_violations=batt_viol,
+        unserved=unserved,
     )
