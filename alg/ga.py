@@ -69,7 +69,7 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
     t_now = [0.0 for _ in range(bikes)]   # simulated time at current position (minutes)
 
     LATE_W = 200.0   # strong penalty weight (tune 100..500)
-    WAIT_W = 0.2     # small weight for waiting (avoid too-early arrivals)
+    WAIT_W = 10.0     # small weight for waiting (avoid too-early arrivals)
 
     for cust in perm:
         node = inst.nodes[cust]
@@ -135,7 +135,14 @@ def _fitness(inst: Instance, perm: Individual, cfg: GAConfig) -> float:
     routes = _decode_to_routes(inst, perm, cfg.bikes)
 
     # Your evaluator handles feasibility/violations
-    sim = simulate_plan(inst, routes, charging_policy="dynamic", fixed_target_soc=0.80)
+    sim, _ = simulate_plan(
+        inst,
+        routes,
+        charging_policy="dynamic",
+        fixed_target_soc=0.80,
+        return_trace=False
+    )
+
 
     return (
         cfg.w_dist * sim.total_dist_km +

@@ -21,7 +21,13 @@ def baseline_random_assignment(inst: Instance, bikes: int = 3, seed: int = 1):
     for i, cid in enumerate(customers):
         routes[i % bikes].append(cid)
 
-    sim = simulate_plan(inst, routes, charging_policy="dynamic", fixed_target_soc=0.80)
+    sim, _ = simulate_plan(
+        inst,
+        routes,
+        charging_policy="dynamic",
+        fixed_target_soc=0.80,
+        return_trace=False
+    )
     return sim, routes
 
 
@@ -72,5 +78,11 @@ def baseline_distance_greedy(inst: Instance, bikes: int = 3):
                 routes[i % bikes].append(r)
             break
 
-    sim = simulate_plan(inst, routes, charging_policy="dynamic", fixed_target_soc=0.80)
+    sim, _ = simulate_plan(
+        inst,
+        routes,
+        charging_policy="dynamic",
+        fixed_target_soc=0.80,
+        return_trace=False
+    )
     return sim, routes

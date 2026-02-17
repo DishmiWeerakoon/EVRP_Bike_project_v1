@@ -59,12 +59,15 @@ def maybe_charge(
       did_charge (0/1),
       battery_violation (0/1)
     """
-    need = _remaining_energy_need(inst, current_id, remaining_route) + reserve_kwh
+    H = 8  # rolling horizon: only plan energy for next 4 legs
+    need = _remaining_energy_need(inst, current_id, remaining_route[:H]) + reserve_kwh
 
-    # If enough energy, no need to charge
-    if soc_kwh >= need:
+    # ---------- HYSTERESIS ----------
+    HYST_KWH = 0.08  # prevents tiny recharge triggers
+
+    if soc_kwh >= need - HYST_KWH:
         return current_id, soc_kwh, 0.0, 0.0, 0.0, 0, 0
-
+    # --------------------------------
     # choose station
     cs = nearest_station(inst, current_id)
     d_to_cs = dist_km(inst, current_id, cs)
@@ -82,13 +85,12 @@ def maybe_charge(
 
     # choose target SOC by policy
     if policy == "dynamic":
-        target = min(inst.params.battery_kwh, need)
+        BUFFER_KWH = 0.25  # tune 0.15–0.30
+        target = min(inst.params.battery_kwh, need + BUFFER_KWH)
     elif policy == "full":
         target = inst.params.battery_kwh
     elif policy == "fixed":
         target = max(0.0, min(inst.params.battery_kwh, fixed_target_soc * inst.params.battery_kwh))
-        # if fixed target is still below needed energy, we must at least cover need
-        target = max(target, min(inst.params.battery_kwh, need))
     else:
         raise ValueError(f"Unknown policy: {policy}")
 

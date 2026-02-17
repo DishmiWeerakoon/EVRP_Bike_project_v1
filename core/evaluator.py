@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Set
+from typing import List, Set, Dict, Any, Tuple
 from data.esogu_parser import Instance
 from core.energy_time import dist_km, travel_time_min, energy_need_kwh
 from core.charging_policies import maybe_charge
@@ -17,15 +17,20 @@ class SimResult:
     late_count: int
     load_violations: int
     battery_violations: int
-    unserved: int                 # ✅ NEW
+    unserved: int
 
 
 def simulate_plan(
     inst: Instance,
     bike_routes: List[List[str]],
     charging_policy: str = "dynamic",
-    fixed_target_soc: float = 0.80
-) -> SimResult:
+    fixed_target_soc: float = 0.80,
+    return_trace: bool = False,
+) -> Tuple[SimResult, List[Dict[str, Any]]]:
+    """
+    If return_trace=True, returns (SimResult, trace_rows).
+    trace_rows is a list of dict rows you can write directly to CSV.
+    """
     depot = inst.depot_id
 
     total_dist = 0.0
@@ -38,16 +43,22 @@ def simulate_plan(
     load_viol = 0
     batt_viol = 0
 
-    served: Set[str] = set()      # ✅ track served customers
+    served: Set[str] = set()
 
-    for route in bike_routes:
+    trace_rows: List[Dict[str, Any]] = []
+
+    def log_event(**kw):
+        if return_trace:
+            trace_rows.append(kw)
+
+    for bike_idx, route in enumerate(bike_routes):
         seq = route[:]
         if not seq or seq[0] != depot:
             seq = [depot] + seq
         if seq[-1] != depot:
             seq = seq + [depot]
 
-        # simple load check (per bike route)
+        # load check (your current simplified version)
         load = 0.0
         for nid in seq:
             n = inst.nodes[nid]
@@ -57,14 +68,41 @@ def simulate_plan(
             load_viol += 1
 
         t = 0.0
-        soc_kwh = inst.params.battery_kwh   # current available energy (kWh)
+        soc_kwh = inst.params.battery_kwh
         cur = seq[0]
+
+        # log start
+        n0 = inst.nodes[cur]
+        log_event(
+            instance=inst.name,
+            bike_id=bike_idx,
+            event="start",
+            from_id=cur, to_id=cur,
+            node_type=n0.node_type,
+            lat=n0.lat, lon=n0.lon,
+            depart_time_min=t,
+            arrive_time_min=t,
+            soc_before_kwh=soc_kwh,
+            soc_after_kwh=soc_kwh,
+            dist_km=0.0,
+            travel_time_min=0.0,
+            wait_time_min=0.0,
+            service_time_min=0.0,
+            charge_time_min=0.0,
+            charge_added_kwh=0.0,
+            late=0,
+            feasible_so_far=1,
+        )
 
         for i in range(1, len(seq)):
             nxt = seq[i]
             remaining = seq[i:]  # nxt..end
 
-            # charging step (policy-based)
+            # --------------- CHARGE DECISION ---------------
+            soc_before_charge = soc_kwh
+            cur_before_charge = cur
+            t_before_charge = t
+
             new_cur, soc_kwh, t_detour, t_charge, d_detour, did_charge, bv = maybe_charge(
                 inst,
                 current_id=cur,
@@ -75,61 +113,170 @@ def simulate_plan(
                 reserve_kwh=0.05,
             )
 
-            # If charging policy says "battery violation / impossible", stop this bike
             if bv:
                 batt_viol += 1
+                log_event(
+                    instance=inst.name,
+                    bike_id=bike_idx,
+                    event="battery_violation",
+                    from_id=cur, to_id=cur,
+                    node_type=inst.nodes[cur].node_type,
+                    lat=inst.nodes[cur].lat, lon=inst.nodes[cur].lon,
+                    depart_time_min=t,
+                    arrive_time_min=t,
+                    soc_before_kwh=soc_kwh,
+                    soc_after_kwh=soc_kwh,
+                    dist_km=0.0,
+                    travel_time_min=0.0,
+                    wait_time_min=0.0,
+                    service_time_min=0.0,
+                    charge_time_min=0.0,
+                    charge_added_kwh=0.0,
+                    late=0,
+                    feasible_so_far=0,
+                )
                 break
 
             if did_charge:
+                # detour travel + charge event log
                 charge_stops += 1
                 total_dist += d_detour
                 total_time += (t_detour + t_charge)
                 travel_time_total += t_detour
                 charge_time_total += t_charge
-                t += (t_detour + t_charge)
-                cur = new_cur  # continue from station
 
-            # travel cur -> nxt
+                # compute charge added
+                charge_added = max(0.0, soc_kwh - soc_before_charge)  # includes travel-to-cs deduction already applied in maybe_charge
+
+                # update time and location
+                t += (t_detour + t_charge)
+                cur = new_cur
+
+                ncs = inst.nodes[cur]
+                log_event(
+                    instance=inst.name,
+                    bike_id=bike_idx,
+                    event="charge",
+                    from_id=cur_before_charge, to_id=cur,
+                    node_type=ncs.node_type,
+                    lat=ncs.lat, lon=ncs.lon,
+                    depart_time_min=t_before_charge,
+                    arrive_time_min=t_before_charge + t_detour,
+                    soc_before_kwh=soc_before_charge,
+                    soc_after_kwh=soc_kwh,
+                    dist_km=d_detour,
+                    travel_time_min=t_detour,
+                    wait_time_min=0.0,
+                    service_time_min=0.0,
+                    charge_time_min=t_charge,
+                    charge_added_kwh=charge_added,
+                    late=0,
+                    feasible_so_far=1,
+                )
+
+            # --------------- TRAVEL cur -> nxt ---------------
             d = dist_km(inst, cur, nxt)
             e = energy_need_kwh(inst, d)
 
             if soc_kwh < e:
                 batt_viol += 1
+                log_event(
+                    instance=inst.name,
+                    bike_id=bike_idx,
+                    event="battery_violation",
+                    from_id=cur, to_id=nxt,
+                    node_type=inst.nodes[nxt].node_type,
+                    lat=inst.nodes[cur].lat, lon=inst.nodes[cur].lon,
+                    depart_time_min=t,
+                    arrive_time_min=t,
+                    soc_before_kwh=soc_kwh,
+                    soc_after_kwh=soc_kwh,
+                    dist_km=d,
+                    travel_time_min=0.0,
+                    wait_time_min=0.0,
+                    service_time_min=0.0,
+                    charge_time_min=0.0,
+                    charge_added_kwh=0.0,
+                    late=0,
+                    feasible_so_far=0,
+                )
                 break
 
+            soc_before_travel = soc_kwh
             soc_kwh -= e
             t_leg = travel_time_min(inst, d)
 
             total_dist += d
             total_time += t_leg
             travel_time_total += t_leg
+            t_depart = t
             t += t_leg
 
-            node = inst.nodes[nxt]
-            if node.node_type == "c":
-                # ✅ mark served
+            n_to = inst.nodes[nxt]
+            log_event(
+                instance=inst.name,
+                bike_id=bike_idx,
+                event="travel",
+                from_id=cur, to_id=nxt,
+                node_type=n_to.node_type,
+                lat=n_to.lat, lon=n_to.lon,
+                depart_time_min=t_depart,
+                arrive_time_min=t,
+                soc_before_kwh=soc_before_travel,
+                soc_after_kwh=soc_kwh,
+                dist_km=d,
+                travel_time_min=t_leg,
+                wait_time_min=0.0,
+                service_time_min=0.0,
+                charge_time_min=0.0,
+                charge_added_kwh=0.0,
+                late=0,
+                feasible_so_far=1,
+            )
+
+            # --------------- ARRIVAL PROCESSING ---------------
+            if n_to.node_type == "c":
                 served.add(nxt)
 
-                # waiting
-                if t < node.tw_earliest:
-                    wait = node.tw_earliest - t
+                wait = 0.0
+                if t < n_to.tw_earliest:
+                    wait = n_to.tw_earliest - t
                     t += wait
                     total_time += wait
 
-                # late check
-                if t > node.tw_latest:
+                late = 1 if t > n_to.tw_latest else 0
+                if late:
                     late_count += 1
 
                 # service
-                t += node.service_time
-                total_time += node.service_time
+                t_service_start = t
+                t += n_to.service_time
+                total_time += n_to.service_time
+
+                log_event(
+                    instance=inst.name,
+                    bike_id=bike_idx,
+                    event="service",
+                    from_id=nxt, to_id=nxt,
+                    node_type=n_to.node_type,
+                    lat=n_to.lat, lon=n_to.lon,
+                    depart_time_min=t_service_start,
+                    arrive_time_min=t_service_start,  # same point
+                    soc_before_kwh=soc_kwh,
+                    soc_after_kwh=soc_kwh,
+                    dist_km=0.0,
+                    travel_time_min=0.0,
+                    wait_time_min=wait,
+                    service_time_min=n_to.service_time,
+                    charge_time_min=0.0,
+                    charge_added_kwh=0.0,
+                    late=late,
+                    feasible_so_far=1,
+                )
 
             cur = nxt
 
-    # ✅ NEW: count unserved customers (core bug fix)
-    total_customers = len(inst.request_ids)
-    unserved = total_customers - len(served)
-
+    unserved = len(inst.request_ids) - len(served)
     feasible = (late_count == 0 and load_viol == 0 and batt_viol == 0 and unserved == 0)
 
     return SimResult(
@@ -143,4 +290,4 @@ def simulate_plan(
         load_violations=load_viol,
         battery_violations=batt_viol,
         unserved=unserved,
-    )
+    ), trace_rows

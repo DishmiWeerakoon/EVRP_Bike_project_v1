@@ -21,13 +21,12 @@ def variant_sibling_target(missing_id: str, dist_keys: set) -> Optional[str]:
     m = re.match(r"^(.+)_\d+$", missing_id)
     if not m:
         return None
-    base = m.group(1)  # '61A'
+    base = m.group(1)
 
     siblings = [k for k in dist_keys if k == base or k.startswith(base + "_")]
     if not siblings:
         return None
 
-    # prefer exact base if present, else smallest suffix
     if base in siblings:
         return base
 
@@ -37,7 +36,6 @@ def variant_sibling_target(missing_id: str, dist_keys: set) -> Optional[str]:
 
     siblings.sort(key=suffix_num)
     return siblings[0]
-
 
 
 def normalize_id_str(x: object) -> str:
@@ -62,14 +60,9 @@ def base_id_candidates(nid: str) -> List[str]:
     s = normalize_id_str(nid)
     cands = [s]
 
-    # 61A_2 -> 61A
     cands.append(re.sub(r"_\d+$", "", s))
-
-    # 60B -> 60 (after removing suffix)
     tmp = re.sub(r"_\d+$", "", s)
     cands.append(re.sub(r"[A-Z]$", "", tmp))
-
-    # 60B_1 -> 60B1
     cands.append(s.replace("_", ""))
 
     out = []
@@ -101,10 +94,10 @@ def add_dist_alias(dist: Dict[str, Dict[str, float]], alias: str, target: str) -
     """
     if alias in dist:
         return
-    dist[alias] = dist[target]  # row alias
+    dist[alias] = dist[target]
     for _, row in dist.items():
         if target in row:
-            row[alias] = row[target]  # col alias
+            row[alias] = row[target]
 
 
 # ----------------------------
@@ -115,8 +108,6 @@ def get_xy(node: Any) -> Optional[Tuple[float, float]]:
     Try common coordinate representations.
     Returns (x, y) if found else None.
     """
-
-    # If you have x/y style
     for ax, ay in [("x", "y"), ("X", "Y"), ("px", "py")]:
         if hasattr(node, ax) and hasattr(node, ay):
             try:
@@ -124,7 +115,7 @@ def get_xy(node: Any) -> Optional[Tuple[float, float]]:
             except Exception:
                 pass
 
-    # If you have lat/lon style (your case)
+    # your case: lat/lon
     for ax, ay in [("lon", "lat"), ("lng", "lat"), ("lat", "lon")]:
         if hasattr(node, ax) and hasattr(node, ay):
             try:
@@ -132,7 +123,6 @@ def get_xy(node: Any) -> Optional[Tuple[float, float]]:
             except Exception:
                 pass
 
-    # If packed in tuple/list
     for attr in ["pos", "coord", "coords", "location", "xy"]:
         if hasattr(node, attr):
             v = getattr(node, attr)
@@ -158,12 +148,6 @@ def nearest_coord_target(
     coord_to_id_raw: Dict[str, Tuple[float, float]],
     tol: float = 1e-4,
 ) -> Optional[str]:
-    """
-    Find nearest existing dist-node by coordinate within tolerance.
-    tol applies to Euclidean distance in coordinate units.
-
-    coord_to_id_raw: {nid: (x,y)} for nodes that already exist in dist.
-    """
     xy = get_xy(missing_node)
     if xy is None:
         return None
@@ -213,7 +197,6 @@ def build_instance(txt_path: str, excel_path: str) -> Instance:
     dist = normalize_dist_keys(dist)
 
     must_exist = [depot_id] + request_ids + charging_ids
-
     created: List[Tuple[str, str, str]] = []
 
     # Pass 1: string aliasing
@@ -256,7 +239,7 @@ def build_instance(txt_path: str, excel_path: str) -> Instance:
                 add_dist_alias(dist, nid, target)
                 created.append((nid, target, "coord_exact"))
 
-    # Pass 3: sibling variant aliasing (61A_2 -> 61A_1, etc.)
+    # Pass 3: sibling variant aliasing
     missing3 = [nid for nid in must_exist if nid not in dist]
     if missing3:
         dist_keys = set(dist.keys())
@@ -276,15 +259,14 @@ def build_instance(txt_path: str, excel_path: str) -> Instance:
                 if xy is not None:
                     coord_to_id_raw[nid] = xy
 
-    # (you can relax tol if needed)
-    for nid in list(missing4):
-        node = nodes.get(nid)
-        if node is None:
-            continue
-        target = nearest_coord_target(node, coord_to_id_raw, tol=1e-3)  # <- loosened
-        if target is not None:
-            add_dist_alias(dist, nid, target)
-            created.append((nid, target, "coord_nearest"))
+        for nid in list(missing4):  # ✅ FIX: keep this loop inside the if-block
+            node = nodes.get(nid)
+            if node is None:
+                continue
+            target = nearest_coord_target(node, coord_to_id_raw, tol=1e-3)
+            if target is not None:
+                add_dist_alias(dist, nid, target)
+                created.append((nid, target, "coord_nearest"))
 
     # Final validation
     missing_final = [nid for nid in must_exist if nid not in dist]
@@ -341,11 +323,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [100]   # adjust if you want more
-    tws = [1]
+    sizes = [60]
+    tws = [2]
     types = ["C", "R", "RC"]
 
-    bikes = 5
+    bikes = 6
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
@@ -359,29 +341,7 @@ def main():
                     continue
 
                 label = f"{typ}{n}_TW{tw}"
-
                 inst = build_instance(txt_path, excel_path)
-
-                # ---- TIME SCALE DEBUG ----
-                tw_e = [inst.nodes[r].tw_earliest for r in inst.request_ids]
-                tw_l = [inst.nodes[r].tw_latest for r in inst.request_ids]
-                st   = [inst.nodes[r].service_time for r in inst.request_ids]
-
-                print("TW earliest min/max:", min(tw_e), max(tw_e))
-                print("TW latest   min/max:", min(tw_l), max(tw_l))
-                print("service_time min/max:", min(st), max(st))
-                print("v_mps:", inst.params.v_mps)
-                # --------------------------
-
-
-                print(label, len(inst.request_ids), len(inst.charging_ids), len(inst.dist))
-                print("req sample:", inst.request_ids[:5])
-
-                if len(inst.request_ids) >= 2:
-                    a, b = inst.request_ids[0], inst.request_ids[1]
-                    print("dist sample:", a, "->", b, inst.dist[a][b])
-                else:
-                    print("dist sample: not enough request_ids")
 
                 # Baselines
                 sim_rnd, _ = baseline_random_assignment(inst, bikes=bikes, seed=1)
@@ -393,13 +353,45 @@ def main():
                 # GA
                 best_routes, _ = run_ga(inst, ga_cfg)
 
-                sim_dyn = simulate_plan(inst, best_routes, charging_policy="dynamic", fixed_target_soc=0.80)
+                # Dynamic (with trace)
+                sim_dyn, trace_dyn = simulate_plan(
+                    inst, best_routes,
+                    charging_policy="dynamic",
+                    fixed_target_soc=0.80,
+                    return_trace=True
+                )
                 rows.append(to_row(label, "GA_routes_dynamic_charge", sim_dyn))
 
-                sim_full = simulate_plan(inst, best_routes, charging_policy="full", fixed_target_soc=0.80)
+                # Save dynamic trace
+                trace_dir = os.path.join(BASE, "results", "traces")
+                os.makedirs(trace_dir, exist_ok=True)
+                trace_csv = os.path.join(trace_dir, f"{label}_GA_dynamic_trace.csv")
+
+                if trace_dyn:
+                    fieldnames = list(trace_dyn[0].keys())
+                    with open(trace_csv, "w", newline="", encoding="utf-8") as f:
+                        w = csv.DictWriter(f, fieldnames=fieldnames)
+                        w.writeheader()
+                        w.writerows(trace_dyn)
+
+                print("Saved trace to:", trace_csv)
+
+                # Full (no trace)
+                sim_full, _ = simulate_plan(
+                    inst, best_routes,
+                    charging_policy="full",
+                    fixed_target_soc=0.80,
+                    return_trace=False
+                )
                 rows.append(to_row(label, "GA_routes_full_charge", sim_full))
 
-                sim_fixed = simulate_plan(inst, best_routes, charging_policy="fixed", fixed_target_soc=0.80)
+                # Fixed80 (no trace)
+                sim_fixed, _ = simulate_plan(
+                    inst, best_routes,
+                    charging_policy="fixed",
+                    fixed_target_soc=0.80,
+                    return_trace=False
+                )
                 rows.append(to_row(label, "GA_routes_fixed80_charge", sim_fixed))
 
                 print(f"Done: {label}")
