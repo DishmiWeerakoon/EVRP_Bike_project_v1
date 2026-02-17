@@ -323,11 +323,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [60]
+    sizes = [20]
     tws = [2]
     types = ["C", "R", "RC"]
 
-    bikes = 6
+    bikes = 4
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
@@ -342,6 +342,11 @@ def main():
 
                 label = f"{typ}{n}_TW{tw}"
                 inst = build_instance(txt_path, excel_path)
+
+                demands = [(inst.nodes[r].D + inst.nodes[r].P) for r in inst.request_ids]
+                print("Demand min/max:", min(demands), max(demands))
+                print("Total demand:", sum(demands))
+                print("Vehicle capacity:", inst.params.load_cap_kg)
 
                 # Baselines
                 sim_rnd, _ = baseline_random_assignment(inst, bikes=bikes, seed=1)

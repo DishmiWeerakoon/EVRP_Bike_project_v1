@@ -58,18 +58,11 @@ def simulate_plan(
         if seq[-1] != depot:
             seq = seq + [depot]
 
-        # load check (your current simplified version)
-        load = 0.0
-        for nid in seq:
-            n = inst.nodes[nid]
-            if n.node_type == "c":
-                load += (n.D + n.P)
-        if load > inst.params.load_cap_kg:
-            load_viol += 1
 
         t = 0.0
         soc_kwh = inst.params.battery_kwh
         cur = seq[0]
+        current_load = 0.0   # ✅ NEW: dynamic load on this bike
 
         # log start
         n0 = inst.nodes[cur]
@@ -237,6 +230,13 @@ def simulate_plan(
             # --------------- ARRIVAL PROCESSING ---------------
             if n_to.node_type == "c":
                 served.add(nxt)
+
+                # ✅ NEW: dynamic load update (PDP logic)
+                current_load += n_to.P    # pickup
+                current_load -= n_to.D    # delivery
+
+                if current_load > inst.params.load_cap_kg:
+                    load_viol += 1
 
                 wait = 0.0
                 if t < n_to.tw_earliest:
