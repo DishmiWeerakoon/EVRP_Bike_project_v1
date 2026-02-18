@@ -59,7 +59,7 @@ def maybe_charge(
       did_charge (0/1),
       battery_violation (0/1)
     """
-    H = 8  # rolling horizon: only plan energy for next 4 legs
+    H = len(remaining_route)  # rolling horizon: only plan energy for next 4 legs
     need = _remaining_energy_need(inst, current_id, remaining_route[:H]) + reserve_kwh
 
     # ---------- HYSTERESIS ----------
@@ -85,7 +85,7 @@ def maybe_charge(
 
     # choose target SOC by policy
     if policy == "dynamic":
-        BUFFER_KWH = 0.25  # tune 0.15–0.30
+        BUFFER_KWH = 0.10  # tune 0.15–0.30
         target = min(inst.params.battery_kwh, need + BUFFER_KWH)
     elif policy == "full":
         target = inst.params.battery_kwh

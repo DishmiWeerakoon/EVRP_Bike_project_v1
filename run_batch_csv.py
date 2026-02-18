@@ -354,11 +354,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [100]
+    sizes = [60]
     tws = [2]
     types = ["C", "R", "RC"]
 
-    bikes = 5
+    bikes = 3
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
@@ -396,7 +396,8 @@ def main():
                     inst, best_routes,
                     charging_policy="dynamic",
                     fixed_target_soc=0.80,
-                    return_trace=True
+                    return_trace=True,
+                    initial_soc=0.60
                 )
                 rows.append(to_row(label, "GA_routes_dynamic_charge", sim_dyn))
                 print_bike_summary(label, "GA_routes_dynamic_charge", sim_dyn)
@@ -420,7 +421,8 @@ def main():
                     inst, best_routes,
                     charging_policy="full",
                     fixed_target_soc=0.80,
-                    return_trace=False
+                    return_trace=False,
+                    initial_soc=0.60
                 )
                 rows.append(to_row(label, "GA_routes_full_charge", sim_full))
                 print_bike_summary(label, "GA_routes_full_charge", sim_full)
@@ -430,7 +432,8 @@ def main():
                     inst, best_routes,
                     charging_policy="fixed",
                     fixed_target_soc=0.80,
-                    return_trace=False
+                    return_trace=False,
+                    initial_soc=0.60
                 )
                 rows.append(to_row(label, "GA_routes_fixed80_charge", sim_fixed))
                 print_bike_summary(label, "GA_routes_fixed80_charge", sim_fixed)

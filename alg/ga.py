@@ -62,7 +62,7 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
     cur = [inst.depot_id for _ in range(bikes)]
     t_now = [0.0 for _ in range(bikes)]
 
-    # keep your load feasibility penalty (soft) but DO NOT hard-balance
+    # soft load tracker (decoder approximation)
     cur_load = [0.0 for _ in range(bikes)]
     cap = inst.params.load_cap_kg
 
@@ -71,19 +71,34 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
     LOAD_W = 50.0
     NEAR_CAP_W = 5.0
 
-    # ✅ only encourage non-empty bikes early (very light)
-    EMPTY_W = 200.0  # tune 50..500 (only affects first few assignments)
+    # Light early-bias (keep)
+    EMPTY_W = 200.0
+
+    # ✅ Hard minimum customers per bike (prevents idle bikes)
+    # For 100 customers, 5 bikes -> 100/(5*2)=10
+    min_per_bike = max(1, len(perm) // (bikes * 2))
 
     for idx, cust in enumerate(perm):
         node = inst.nodes[cust]
 
-        best_b = 0
+        best_b = None
         best_score = float("inf")
 
+        # which bikes are still underfilled?
+        underfilled = [bb for bb in range(bikes) if len(routes[bb]) < min_per_bike]
+
+        # We'll track a fallback (best feasible overall) in case all underfilled are infeasible
+        fallback_b = None
+        fallback_score = float("inf")
+
         for b in range(bikes):
+            # ✅ Force: while there exist underfilled bikes, only consider them
+            # BUT if an underfilled bike is infeasible due to capacity, allow fallback later.
+            if underfilled and (b not in underfilled):
+                continue
+
             d = dist_km(inst, cur[b], cust)
             t_travel = travel_time_min(inst, d)
-
             arrival = t_now[b] + t_travel
 
             wait = 0.0
@@ -102,12 +117,12 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
                 continue
 
             util = proj_load / cap if cap > 0 else 0.0
-            load_pen = LOAD_W * util + NEAR_CAP_W * (util**4)
+            load_pen = LOAD_W * util + NEAR_CAP_W * (util ** 4)
 
-            # ✅ small bias to use empty bikes early
+            # light early reward to empty bikes (still ok)
             empty_pen = 0.0
-            if idx < bikes * 5 and len(routes[b]) == 0:  # only early stage
-                empty_pen = -EMPTY_W  # reward empty bikes
+            if idx < bikes * 5 and len(routes[b]) == 0:
+                empty_pen = -EMPTY_W
 
             score = finish + WAIT_W * wait + LATE_W * late + load_pen + empty_pen
 
@@ -115,12 +130,53 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
                 best_score = score
                 best_b = b
 
+        # ✅ If we forced underfilled bikes but none were feasible (capacity), relax the rule:
+        if best_b is None:
+            for b in range(bikes):
+                d = dist_km(inst, cur[b], cust)
+                t_travel = travel_time_min(inst, d)
+                arrival = t_now[b] + t_travel
+
+                wait = 0.0
+                if arrival < node.tw_earliest:
+                    wait = node.tw_earliest - arrival
+                    arrival = node.tw_earliest
+
+                late = 0.0
+                if arrival > node.tw_latest:
+                    late = arrival - node.tw_latest
+
+                finish = arrival + node.service_time
+
+                proj_load = cur_load[b] + node.P - node.D
+                if proj_load > cap:
+                    continue
+
+                util = proj_load / cap if cap > 0 else 0.0
+                load_pen = LOAD_W * util + NEAR_CAP_W * (util ** 4)
+
+                empty_pen = 0.0
+                if idx < bikes * 5 and len(routes[b]) == 0:
+                    empty_pen = -EMPTY_W
+
+                score = finish + WAIT_W * wait + LATE_W * late + load_pen + empty_pen
+
+                if score < fallback_score:
+                    fallback_score = score
+                    fallback_b = b
+
+            if fallback_b is None:
+                # truly impossible due to capacity constraints in decoder approximation
+                fallback_b = 0
+
+            best_b = fallback_b
+
+        # assign
         routes[best_b].append(cust)
 
-        # update
+        # update state
         d = dist_km(inst, cur[best_b], cust)
         t_travel = travel_time_min(inst, d)
-
         arrival = t_now[best_b] + t_travel
         if arrival < node.tw_earliest:
             arrival = node.tw_earliest

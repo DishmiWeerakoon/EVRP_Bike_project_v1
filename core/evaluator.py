@@ -33,8 +33,7 @@ def simulate_plan(
     bike_routes: List[List[str]],
     charging_policy: str = "dynamic",
     fixed_target_soc: float = 0.80,
-    return_trace: bool = False,
-) -> Tuple[SimResult, List[Dict[str, Any]]]:
+    return_trace: bool = False, initial_soc: float = 1.0) -> Tuple[SimResult, List[Dict[str, Any]]]:
     """
     If return_trace=True, returns (SimResult, trace_rows).
     trace_rows is a list of dict rows you can write directly to CSV.
@@ -77,7 +76,8 @@ def simulate_plan(
 
         
         t = 0.0
-        soc_kwh = inst.params.battery_kwh
+        initial_soc = max(0.0, min(1.0, initial_soc))
+        soc_kwh = inst.params.battery_kwh * initial_soc
         cur = seq[0]
 
         # ✅ Start-of-route preload: vehicle leaves depot carrying all deliveries assigned to this route
