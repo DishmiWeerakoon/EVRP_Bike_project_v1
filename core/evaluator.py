@@ -4,6 +4,8 @@ from typing import List, Set, Dict, Any, Tuple
 from data.esogu_parser import Instance
 from core.energy_time import dist_km, travel_time_min, energy_need_kwh
 from core.charging_policies import maybe_charge
+from dataclasses import dataclass, field
+from typing import List
 
 
 @dataclass
@@ -18,6 +20,12 @@ class SimResult:
     load_violations: int
     battery_violations: int
     unserved: int
+    bike_dist_km: List[float] = field(default_factory=list)
+    bike_total_time_min: List[float] = field(default_factory=list)
+    bike_travel_time_min: List[float] = field(default_factory=list)
+    bike_charge_time_min: List[float] = field(default_factory=list)
+    bike_customers: List[int] = field(default_factory=list)
+    makespan_min: float = 0.0
 
 
 def simulate_plan(
@@ -46,6 +54,14 @@ def simulate_plan(
     served: Set[str] = set()
 
     trace_rows: List[Dict[str, Any]] = []
+
+    B = len(bike_routes)
+
+    bike_dist = [0.0] * B
+    bike_total_time = [0.0] * B
+    bike_travel_time = [0.0] * B
+    bike_charge_time = [0.0] * B
+    bike_customers = [0] * B
 
     def log_event(**kw):
         if return_trace:
@@ -150,6 +166,10 @@ def simulate_plan(
                 total_time += (t_detour + t_charge)
                 travel_time_total += t_detour
                 charge_time_total += t_charge
+                bike_dist[bike_idx] += d_detour
+                bike_total_time[bike_idx] += (t_detour + t_charge)
+                bike_travel_time[bike_idx] += t_detour
+                bike_charge_time[bike_idx] += t_charge
 
                 # compute charge added
                 charge_added = max(0.0, soc_kwh - soc_before_charge)  # includes travel-to-cs deduction already applied in maybe_charge
@@ -222,6 +242,10 @@ def simulate_plan(
             t_depart = t
             t += t_leg
 
+            bike_dist[bike_idx] += d
+            bike_total_time[bike_idx] += t_leg
+            bike_travel_time[bike_idx] += t_leg
+
             n_to = inst.nodes[nxt]
             log_event(
                 instance=inst.name,
@@ -266,12 +290,13 @@ def simulate_plan(
                 if current_load < 0:
                     load_viol += 1  # should never happen now
                     current_load = 0.0
-                    
+
                 wait = 0.0
                 if t < n_to.tw_earliest:
                     wait = n_to.tw_earliest - t
                     t += wait
                     total_time += wait
+                    bike_total_time[bike_idx] += wait
 
                 late = 1 if t > n_to.tw_latest else 0
                 if late:
@@ -281,6 +306,8 @@ def simulate_plan(
                 t_service_start = t
                 t += n_to.service_time
                 total_time += n_to.service_time
+                bike_total_time[bike_idx] += n_to.service_time
+                bike_customers[bike_idx] += 1
 
                 log_event(
                     instance=inst.name,
@@ -311,16 +338,24 @@ def simulate_plan(
     feasible = (late_count == 0 and load_viol == 0 and batt_viol == 0 and unserved == 0)
     #load_violation_flag = 1 if current_load > inst.params.load_cap_kg else 0
 
+    makespan_min = max(bike_total_time) if bike_total_time else 0.0
+
 
     return SimResult(
-        feasible=feasible,
-        total_dist_km=total_dist,
-        total_time_min=total_time,
-        travel_time_min=travel_time_total,
-        charge_time_min=charge_time_total,
-        charge_stops=charge_stops,
-        late_count=late_count,
-        load_violations=load_viol,
-        battery_violations=batt_viol,
-        unserved=unserved,
-    ), trace_rows
+    feasible=feasible,
+    total_dist_km=total_dist,
+    total_time_min=total_time,
+    travel_time_min=travel_time_total,
+    charge_time_min=charge_time_total,
+    charge_stops=charge_stops,
+    late_count=late_count,
+    load_violations=load_viol,
+    battery_violations=batt_viol,
+    unserved=unserved,
+    bike_dist_km=bike_dist,
+    bike_total_time_min=bike_total_time,
+    bike_travel_time_min=bike_travel_time,
+    bike_charge_time_min=bike_charge_time,
+    bike_customers=bike_customers,
+    makespan_min=makespan_min,   # ✅ ADD THIS
+), trace_rows

@@ -11,6 +11,37 @@ from data.distance_loader import load_esogu_distance_matrix
 
 
 # ----------------------------
+# Per-bike terminal summary (only selected methods)
+# ----------------------------
+PRINT_METHODS = {
+    "baseline_random_dynamic",
+    "GA_routes_dynamic_charge",
+    "GA_routes_full_charge",
+    "GA_routes_fixed80_charge",
+}
+
+def print_bike_summary(instance_name: str, method: str, sim) -> None:
+    if method not in PRINT_METHODS:
+        return
+
+    # If per-bike arrays are missing, don't crash
+    if not getattr(sim, "bike_dist_km", None):
+        print(f"\n=== {instance_name} | {method} ===")
+        print("Per-bike arrays not found in SimResult (did you update simulate_plan return?)")
+        return
+
+    print(f"\n=== {instance_name} | {method} ===")
+    for b in range(len(sim.bike_dist_km)):
+        print(
+            f"Bike {b}: "
+            f"customers={sim.bike_customers[b]:3d} | "
+            f"dist_km={sim.bike_dist_km[b]:7.2f} | "
+            f"travel_min={sim.bike_travel_time_min[b]:7.2f} | "
+            f"charge_min={sim.bike_charge_time_min[b]:7.2f} | "
+            f"total_min={sim.bike_total_time_min[b]:7.2f}"
+        )
+
+# ----------------------------
 # ID normalization
 # ----------------------------
 
@@ -280,10 +311,10 @@ def build_instance(txt_path: str, excel_path: str) -> Instance:
             f"Sample missing node attrs (first 30): {attrs[:30]}\n"
             f"NOTE: We tried string + exact coord + nearest coord aliasing."
         )
-
+    '''
     if created:
         print("Distance aliasing applied (up to 20):", created[:20])
-
+    '''
     return Instance(
         name=name,
         nodes=nodes,
@@ -344,13 +375,15 @@ def main():
                 inst = build_instance(txt_path, excel_path)
 
                 demands = [(inst.nodes[r].D + inst.nodes[r].P) for r in inst.request_ids]
-                print("Demand min/max:", min(demands), max(demands))
-                print("Total demand:", sum(demands))
-                print("Vehicle capacity:", inst.params.load_cap_kg)
+                #print("Demand min/max:", min(demands), max(demands))
+                #print("Total demand:", sum(demands))
+                #print("Vehicle capacity:", inst.params.load_cap_kg)
 
                 # Baselines
                 sim_rnd, _ = baseline_random_assignment(inst, bikes=bikes, seed=1)
                 rows.append(to_row(label, "baseline_random_dynamic", sim_rnd))
+
+                print_bike_summary(label, "baseline_random_dynamic", sim_rnd)
 
                 sim_grd, _ = baseline_distance_greedy(inst, bikes=bikes)
                 rows.append(to_row(label, "baseline_greedy_dynamic", sim_grd))
@@ -366,6 +399,7 @@ def main():
                     return_trace=True
                 )
                 rows.append(to_row(label, "GA_routes_dynamic_charge", sim_dyn))
+                print_bike_summary(label, "GA_routes_dynamic_charge", sim_dyn)
 
                 # Save dynamic trace
                 trace_dir = os.path.join(BASE, "results", "traces")
@@ -389,6 +423,7 @@ def main():
                     return_trace=False
                 )
                 rows.append(to_row(label, "GA_routes_full_charge", sim_full))
+                print_bike_summary(label, "GA_routes_full_charge", sim_full)
 
                 # Fixed80 (no trace)
                 sim_fixed, _ = simulate_plan(
@@ -398,6 +433,7 @@ def main():
                     return_trace=False
                 )
                 rows.append(to_row(label, "GA_routes_fixed80_charge", sim_fixed))
+                print_bike_summary(label, "GA_routes_fixed80_charge", sim_fixed)
 
                 print(f"Done: {label}")
 

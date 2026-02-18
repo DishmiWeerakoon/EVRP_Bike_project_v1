@@ -168,7 +168,7 @@ def _fitness(inst: Instance, perm: Individual, cfg: GAConfig) -> float:
 
     return (
         cfg.w_dist * sim.total_dist_km +
-        cfg.w_time * sim.total_time_min +
+        cfg.w_time * sim.makespan_min +
         cfg.w_stops * sim.charge_stops +
         cfg.w_late * sim.late_count +
         cfg.w_loadviol * sim.load_violations +
