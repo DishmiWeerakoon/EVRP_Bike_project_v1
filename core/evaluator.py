@@ -59,10 +59,19 @@ def simulate_plan(
             seq = seq + [depot]
 
 
+        
         t = 0.0
         soc_kwh = inst.params.battery_kwh
         cur = seq[0]
-        current_load = 0.0   # ✅ NEW: dynamic load on this bike
+
+        # ✅ Start-of-route preload: vehicle leaves depot carrying all deliveries assigned to this route
+        # (Only count customer nodes)
+        route_customers = [nid for nid in seq if nid in inst.nodes and inst.nodes[nid].node_type == "c"]
+        current_load = sum(inst.nodes[nid].D for nid in route_customers)
+
+        # Capacity check at departure (if too big, route is infeasible)
+        if current_load > inst.params.load_cap_kg:
+            load_viol += 1
 
         # log start
         n0 = inst.nodes[cur]
@@ -85,6 +94,8 @@ def simulate_plan(
             charge_added_kwh=0.0,
             late=0,
             feasible_so_far=1,
+            current_load=current_load,
+            capacity=inst.params.load_cap_kg,
         )
 
         for i in range(1, len(seq)):
@@ -127,6 +138,8 @@ def simulate_plan(
                     charge_added_kwh=0.0,
                     late=0,
                     feasible_so_far=0,
+                    current_load=current_load,
+                    capacity=inst.params.load_cap_kg,
                 )
                 break
 
@@ -165,6 +178,8 @@ def simulate_plan(
                     charge_added_kwh=charge_added,
                     late=0,
                     feasible_so_far=1,
+                    current_load=current_load,
+                    capacity=inst.params.load_cap_kg,
                 )
 
             # --------------- TRAVEL cur -> nxt ---------------
@@ -192,6 +207,8 @@ def simulate_plan(
                     charge_added_kwh=0.0,
                     late=0,
                     feasible_so_far=0,
+                    current_load=current_load,
+                    capacity=inst.params.load_cap_kg,
                 )
                 break
 
@@ -225,19 +242,31 @@ def simulate_plan(
                 charge_added_kwh=0.0,
                 late=0,
                 feasible_so_far=1,
+                current_load=current_load,
+                capacity=inst.params.load_cap_kg,
             )
 
             # --------------- ARRIVAL PROCESSING ---------------
             if n_to.node_type == "c":
                 served.add(nxt)
 
-                # ✅ NEW: dynamic load update (PDP logic)
-                current_load += n_to.P    # pickup
-                current_load -= n_to.D    # delivery
+                # Apply delivery first (must have items to deliver)
+                if current_load < n_to.D:
+                    load_viol += 1
+                    # still apply to keep simulation consistent
+                current_load -= n_to.D
 
+                # Apply pickup
+                current_load += n_to.P
+
+                # Enforce bounds
                 if current_load > inst.params.load_cap_kg:
                     load_viol += 1
 
+                if current_load < 0:
+                    load_viol += 1  # should never happen now
+                    current_load = 0.0
+                    
                 wait = 0.0
                 if t < n_to.tw_earliest:
                     wait = n_to.tw_earliest - t
@@ -272,12 +301,16 @@ def simulate_plan(
                     charge_added_kwh=0.0,
                     late=late,
                     feasible_so_far=1,
+                    current_load=current_load,
+                    capacity=inst.params.load_cap_kg,
                 )
 
             cur = nxt
 
     unserved = len(inst.request_ids) - len(served)
     feasible = (late_count == 0 and load_viol == 0 and batt_viol == 0 and unserved == 0)
+    #load_violation_flag = 1 if current_load > inst.params.load_cap_kg else 0
+
 
     return SimResult(
         feasible=feasible,

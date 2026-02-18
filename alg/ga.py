@@ -29,6 +29,7 @@ class GAConfig:
     w_loadviol: float = 400.0
     w_battviol: float = 2000.0
     w_unserved: float = 10000.0
+    w_balance: float = 2.0   # tune 10..200 (bigger = more balanced)
 
 
 
@@ -54,24 +55,26 @@ def _random_individual(inst: Instance, rng: random.Random) -> Individual:
 from core.energy_time import dist_km, travel_time_min
 
 def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
-    """
-    Time-window-aware greedy assignment.
-    Assign each next customer to the bike that minimizes:
-      - predicted lateness (strong penalty)
-      - then route time/travel time
-    This typically cuts late_count a LOT compared to travel-time-only splitting.
-    """
     if bikes <= 0:
         raise ValueError("bikes must be >= 1")
 
     routes: Routes = [[] for _ in range(bikes)]
     cur = [inst.depot_id for _ in range(bikes)]
-    t_now = [0.0 for _ in range(bikes)]   # simulated time at current position (minutes)
+    t_now = [0.0 for _ in range(bikes)]
 
-    LATE_W = 200.0   # strong penalty weight (tune 100..500)
-    WAIT_W = 10.0     # small weight for waiting (avoid too-early arrivals)
+    # keep your load feasibility penalty (soft) but DO NOT hard-balance
+    cur_load = [0.0 for _ in range(bikes)]
+    cap = inst.params.load_cap_kg
 
-    for cust in perm:
+    LATE_W = 200.0
+    WAIT_W = 10.0
+    LOAD_W = 50.0
+    NEAR_CAP_W = 5.0
+
+    # ✅ only encourage non-empty bikes early (very light)
+    EMPTY_W = 200.0  # tune 50..500 (only affects first few assignments)
+
+    for idx, cust in enumerate(perm):
         node = inst.nodes[cust]
 
         best_b = 0
@@ -83,31 +86,38 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
 
             arrival = t_now[b] + t_travel
 
-            # waiting if early
             wait = 0.0
             if arrival < node.tw_earliest:
                 wait = node.tw_earliest - arrival
                 arrival = node.tw_earliest
 
-            # lateness if late
             late = 0.0
             if arrival > node.tw_latest:
                 late = arrival - node.tw_latest
 
-            # after service
             finish = arrival + node.service_time
 
-            # scoring: prioritize reducing lateness
-            score = finish + WAIT_W * wait + LATE_W * late
+            proj_load = cur_load[b] + node.P - node.D
+            if proj_load > cap:
+                continue
+
+            util = proj_load / cap if cap > 0 else 0.0
+            load_pen = LOAD_W * util + NEAR_CAP_W * (util**4)
+
+            # ✅ small bias to use empty bikes early
+            empty_pen = 0.0
+            if idx < bikes * 5 and len(routes[b]) == 0:  # only early stage
+                empty_pen = -EMPTY_W  # reward empty bikes
+
+            score = finish + WAIT_W * wait + LATE_W * late + load_pen + empty_pen
 
             if score < best_score:
                 best_score = score
                 best_b = b
 
-        # assign to best bike
         routes[best_b].append(cust)
 
-        # update that bike state
+        # update
         d = dist_km(inst, cur[best_b], cust)
         t_travel = travel_time_min(inst, d)
 
@@ -117,6 +127,7 @@ def _decode_to_routes(inst: Instance, perm: Individual, bikes: int) -> Routes:
 
         t_now[best_b] = arrival + node.service_time
         cur[best_b] = cust
+        cur_load[best_b] += node.P - node.D
 
     return routes
 
@@ -134,13 +145,36 @@ def _fitness(inst: Instance, perm: Individual, cfg: GAConfig) -> float:
     _assert_valid_perm(inst, perm)
     routes = _decode_to_routes(inst, perm, cfg.bikes)
 
-    # Your evaluator handles feasibility/violations
+    # balance by customers count (stable + simple)
+    lens = [len(r) for r in routes]
+    bal_count = max(lens) - min(lens)
+
+    # balance by delivery preload estimate (optional)
+    del_loads = [sum(inst.nodes[c].D for c in r) for r in routes]
+    bal_del = (max(del_loads) - min(del_loads)) / max(1.0, inst.params.load_cap_kg)  # normalized
+
+    balance_pen = bal_count + 0.5 * bal_del
+
     sim, _ = simulate_plan(
-        inst,
-        routes,
+        inst, routes,
         charging_policy="dynamic",
         fixed_target_soc=0.80,
         return_trace=False
+    )
+
+    # ✅ Balance metric based on DELIVERY preload per bike (matches simulator logic)
+    del_loads = [sum(inst.nodes[c].D for c in r) for r in routes]
+    balance_pen = (max(del_loads) - min(del_loads))  # kg spread
+
+    return (
+        cfg.w_dist * sim.total_dist_km +
+        cfg.w_time * sim.total_time_min +
+        cfg.w_stops * sim.charge_stops +
+        cfg.w_late * sim.late_count +
+        cfg.w_loadviol * sim.load_violations +
+        cfg.w_battviol * sim.battery_violations +
+        cfg.w_unserved * sim.unserved +
+        cfg.w_balance * balance_pen
     )
 
 

@@ -1,0 +1,16 @@
+instance,method,feasible,total_dist_km,total_time_min,travel_time_min,charge_time_min,charge_stops,late_count,load_violations,battery_violations,unserved
+C100_TW2,baseline_random_dynamic,0,102.3063,4664.851,284.1842,85.6805,2,0,0,1,1
+C100_TW2,baseline_greedy_dynamic,1,106.9032,4379.246,296.9533,73.5265,2,0,0,0,0
+C100_TW2,GA_routes_dynamic_charge,1,96.7492,1808.0045,268.7477,211.7971,5,0,0,0,0
+C100_TW2,GA_routes_full_charge,1,96.4695,1876.5202,267.9708,257.4365,5,0,0,0,0
+C100_TW2,GA_routes_fixed80_charge,1,96.4638,1851.4362,267.955,225.0163,6,0,0,0,0
+R100_TW2,baseline_random_dynamic,0,100.271,4779.4776,278.5306,83.9753,2,0,0,2,0
+R100_TW2,baseline_greedy_dynamic,1,108.5208,4393.0215,301.4468,127.1472,3,0,0,0,0
+R100_TW2,GA_routes_dynamic_charge,1,106.0946,1828.661,294.7072,252.7334,6,0,0,0,0
+R100_TW2,GA_routes_full_charge,1,107.1451,1875.9144,297.6252,297.0688,6,0,0,0,0
+R100_TW2,GA_routes_fixed80_charge,0,106.2683,1828.5538,295.1896,237.7439,7,0,0,1,0
+RC100_TW2,baseline_random_dynamic,0,101.091,4587.2462,280.8084,41.4149,1,0,0,3,0
+RC100_TW2,baseline_greedy_dynamic,0,103.951,4435.3791,288.7528,77.6412,2,0,0,1,0
+RC100_TW2,GA_routes_dynamic_charge,1,93.0162,1806.7626,258.3784,171.6956,4,0,0,0,0
+RC100_TW2,GA_routes_full_charge,1,92.9551,1840.7237,258.2085,205.8268,4,0,0,0,0
+RC100_TW2,GA_routes_fixed80_charge,1,94.8615,1858.5891,263.5041,212.8578,6,0,0,0,0
