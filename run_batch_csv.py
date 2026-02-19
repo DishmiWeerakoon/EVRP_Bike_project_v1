@@ -354,11 +354,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [100]
+    sizes = [20]
     tws = [2]
     types = ["C", "R", "RC"]
 
-    bikes = 4
+    bikes = 2
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
