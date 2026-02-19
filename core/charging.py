@@ -8,7 +8,7 @@ def charge_time_min(inst: Instance, energy_added_kwh: float) -> float:
     g = inst.params.recharge_rate
     if g <= 0:
         return 1e9
-    return energy_added_kwh / g
+    return (energy_added_kwh / g) * 60.0
 
 
 def nearest_station(inst: Instance, from_id: str) -> str:

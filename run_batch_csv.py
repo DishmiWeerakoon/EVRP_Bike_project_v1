@@ -354,11 +354,11 @@ def main():
     txt_folder = os.path.join(BASE, "dataset", "ESOGU-EVRP-PDP-TW")
     excel_path = os.path.join(BASE, "dataset", "distance_matrix.xlsx")
 
-    sizes = [60]
+    sizes = [100]
     tws = [2]
     types = ["C", "R", "RC"]
 
-    bikes = 3
+    bikes = 4
     ga_cfg = GAConfig(bikes=bikes, pop_size=60, generations=120)
 
     rows = []
@@ -389,9 +389,13 @@ def main():
                 rows.append(to_row(label, "baseline_greedy_dynamic", sim_grd))
 
                 # GA
+                # ---------------- GA ----------------
                 best_routes, _ = run_ga(inst, ga_cfg)
 
-                # Dynamic (with trace)
+                trace_dir = os.path.join(BASE, "results", "traces")
+                os.makedirs(trace_dir, exist_ok=True)
+
+                # -------- Dynamic --------
                 sim_dyn, trace_dyn = simulate_plan(
                     inst, best_routes,
                     charging_policy="dynamic",
@@ -402,41 +406,56 @@ def main():
                 rows.append(to_row(label, "GA_routes_dynamic_charge", sim_dyn))
                 print_bike_summary(label, "GA_routes_dynamic_charge", sim_dyn)
 
-                # Save dynamic trace
-                trace_dir = os.path.join(BASE, "results", "traces")
-                os.makedirs(trace_dir, exist_ok=True)
-                trace_csv = os.path.join(trace_dir, f"{label}_GA_dynamic_trace.csv")
-
+                trace_csv_dyn = os.path.join(trace_dir, f"{label}_GA_routes_dynamic_charge_trace.csv")
                 if trace_dyn:
                     fieldnames = list(trace_dyn[0].keys())
-                    with open(trace_csv, "w", newline="", encoding="utf-8") as f:
+                    with open(trace_csv_dyn, "w", newline="", encoding="utf-8") as f:
                         w = csv.DictWriter(f, fieldnames=fieldnames)
                         w.writeheader()
                         w.writerows(trace_dyn)
+                    print("Saved trace to:", trace_csv_dyn)
 
-                print("Saved trace to:", trace_csv)
 
-                # Full (no trace)
-                sim_full, _ = simulate_plan(
+                # -------- Full --------
+                sim_full, trace_full = simulate_plan(
                     inst, best_routes,
                     charging_policy="full",
                     fixed_target_soc=0.80,
-                    return_trace=False,
+                    return_trace=True,
                     initial_soc=0.60
                 )
                 rows.append(to_row(label, "GA_routes_full_charge", sim_full))
                 print_bike_summary(label, "GA_routes_full_charge", sim_full)
 
-                # Fixed80 (no trace)
-                sim_fixed, _ = simulate_plan(
+                trace_csv_full = os.path.join(trace_dir, f"{label}_GA_routes_full_charge_trace.csv")
+                if trace_full:
+                    fieldnames = list(trace_full[0].keys())
+                    with open(trace_csv_full, "w", newline="", encoding="utf-8") as f:
+                        w = csv.DictWriter(f, fieldnames=fieldnames)
+                        w.writeheader()
+                        w.writerows(trace_full)
+                    print("Saved trace to:", trace_csv_full)
+
+
+                # -------- Fixed 80 --------
+                sim_fixed, trace_fixed = simulate_plan(
                     inst, best_routes,
                     charging_policy="fixed",
                     fixed_target_soc=0.80,
-                    return_trace=False,
+                    return_trace=True,
                     initial_soc=0.60
                 )
                 rows.append(to_row(label, "GA_routes_fixed80_charge", sim_fixed))
                 print_bike_summary(label, "GA_routes_fixed80_charge", sim_fixed)
+
+                trace_csv_fixed = os.path.join(trace_dir, f"{label}_GA_routes_fixed80_charge_trace.csv")
+                if trace_fixed:
+                    fieldnames = list(trace_fixed[0].keys())
+                    with open(trace_csv_fixed, "w", newline="", encoding="utf-8") as f:
+                        w = csv.DictWriter(f, fieldnames=fieldnames)
+                        w.writeheader()
+                        w.writerows(trace_fixed)
+                    print("Saved trace to:", trace_csv_fixed)
 
                 print(f"Done: {label}")
 

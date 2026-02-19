@@ -130,7 +130,7 @@ def simulate_plan(
                 remaining_route=remaining,
                 policy=charging_policy,
                 fixed_target_soc=fixed_target_soc,
-                reserve_kwh=0.05,
+                reserve_kwh=0.10,
             )
 
             if bv:
@@ -202,9 +202,99 @@ def simulate_plan(
                     capacity=inst.params.load_cap_kg,
                 )
 
+                # --------------- PRE-LEG FEASIBILITY GUARDRAIL ---------------
+                RESERVE_KWH = 0.10  # recommended 0.10; try 0.15 for hard R instances
+
+                e_leg = energy_need_kwh(inst, cur, nxt)  # energy needed for the immediate next leg
+
+                if soc_kwh < e_leg + RESERVE_KWH:
+                    # force a charge BEFORE attempting the leg
+                    soc_before_charge2 = soc_kwh
+                    cur_before_charge2 = cur
+                    t_before_charge2 = t
+
+                    new_cur2, soc_kwh, t_detour2, t_charge2, d_detour2, did_charge2, bv2 = maybe_charge(
+                        inst,
+                        current_id=cur,
+                        soc_kwh=soc_kwh,
+                        remaining_route=remaining,        # includes nxt..end already
+                        policy=charging_policy,
+                        fixed_target_soc=fixed_target_soc,
+                        reserve_kwh=RESERVE_KWH,
+                    )
+
+                    if bv2:
+                        batt_viol += 1
+                        log_event(
+                            instance=inst.name,
+                            bike_id=bike_idx,
+                            event="battery_violation",
+                            from_id=cur, to_id=cur,
+                            node_type=inst.nodes[cur].node_type,
+                            lat=inst.nodes[cur].lat, lon=inst.nodes[cur].lon,
+                            depart_time_min=t,
+                            arrive_time_min=t,
+                            soc_before_kwh=soc_kwh,
+                            soc_after_kwh=soc_kwh,
+                            dist_km=0.0,
+                            travel_time_min=0.0,
+                            wait_time_min=0.0,
+                            service_time_min=0.0,
+                            charge_time_min=0.0,
+                            charge_added_kwh=0.0,
+                            late=0,
+                            feasible_so_far=0,
+                            current_load=current_load,
+                            capacity=inst.params.load_cap_kg,
+                        )
+                        break
+
+                    if did_charge2:
+                        charge_stops += 1
+                        total_dist += d_detour2
+                        total_time += (t_detour2 + t_charge2)
+                        travel_time_total += t_detour2
+                        charge_time_total += t_charge2
+
+                        bike_dist[bike_idx] += d_detour2
+                        bike_total_time[bike_idx] += (t_detour2 + t_charge2)
+                        bike_travel_time[bike_idx] += t_detour2
+                        bike_charge_time[bike_idx] += t_charge2
+
+                        charge_added2 = max(0.0, soc_kwh - soc_before_charge2)
+
+                        t += (t_detour2 + t_charge2)
+                        cur = new_cur2
+
+                        ncs2 = inst.nodes[cur]
+                        log_event(
+                            instance=inst.name,
+                            bike_id=bike_idx,
+                            event="charge",
+                            from_id=cur_before_charge2, to_id=cur,
+                            node_type=ncs2.node_type,
+                            lat=ncs2.lat, lon=ncs2.lon,
+                            depart_time_min=t_before_charge2,
+                            arrive_time_min=t_before_charge2 + t_detour2,
+                            soc_before_kwh=soc_before_charge2,
+                            soc_after_kwh=soc_kwh,
+                            dist_km=d_detour2,
+                            travel_time_min=t_detour2,
+                            wait_time_min=0.0,
+                            service_time_min=0.0,
+                            charge_time_min=t_charge2,
+                            charge_added_kwh=charge_added2,
+                            late=0,
+                            feasible_so_far=1,
+                            current_load=current_load,
+                            capacity=inst.params.load_cap_kg,
+                        )
+                # ------------------------------------------------------------
+
+
             # --------------- TRAVEL cur -> nxt ---------------
             d = dist_km(inst, cur, nxt)
-            e = energy_need_kwh(inst, d)
+            e = energy_need_kwh(inst, cur, nxt)
 
             if soc_kwh < e:
                 batt_viol += 1

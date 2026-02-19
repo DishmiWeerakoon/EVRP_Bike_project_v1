@@ -40,53 +40,36 @@ def maybe_charge(
     current_id: str,
     soc_kwh: float,
     remaining_route: List[str],
-    policy: str = "dynamic",           # "dynamic" | "full" | "fixed"
-    fixed_target_soc: float = 0.80,    # only for policy="fixed"
-    reserve_kwh: float = 0.05
+    policy: str = "dynamic",
+    fixed_target_soc: float = 0.80,
+    reserve_kwh: float = 0.10
 ) -> Tuple[str, float, float, float, float, int, int]:
-    """
-    Charging policies (applied only if current battery can't finish remaining route approx):
-      - dynamic: charge only required (need + reserve), capped by battery
-      - full:    charge to 100% battery
-      - fixed:   charge to fixed_target_soc * battery
 
-    Returns:
-      new_current_id,
-      new_soc_kwh,
-      detour_time_min,
-      charge_time_min,
-      detour_dist_km,
-      did_charge (0/1),
-      battery_violation (0/1)
-    """
-    H = len(remaining_route)  # rolling horizon: only plan energy for next 4 legs
-    need = _remaining_energy_need(inst, current_id, remaining_route[:H]) + reserve_kwh
+    # rolling horizon (your comment says 4 legs; implement it)
+    H = min(4, len(remaining_route))
+    need_from_cur = _remaining_energy_need(inst, current_id, remaining_route[:H]) + reserve_kwh
 
-    # ---------- HYSTERESIS ----------
-    HYST_KWH = 0.08  # prevents tiny recharge triggers
-
-    if soc_kwh >= need - HYST_KWH:
+    HYST_KWH = 0.08
+    if soc_kwh >= need_from_cur - HYST_KWH:
         return current_id, soc_kwh, 0.0, 0.0, 0.0, 0, 0
-    # --------------------------------
-    # choose station
+
     cs = nearest_station(inst, current_id)
     d_to_cs = dist_km(inst, current_id, cs)
-
-    # ✅ energy_need_kwh expects (a, b), NOT distance
     e_to_cs = energy_need_kwh(inst, current_id, cs)
 
     if soc_kwh < e_to_cs:
-        # cannot reach station
         return current_id, soc_kwh, 0.0, 0.0, 0.0, 0, 1
 
     # travel to station
     soc_kwh -= e_to_cs
     t_detour = travel_time_min(inst, d_to_cs)
 
-    # choose target SOC by policy
+    # ✅ KEY FIX: recompute energy need starting FROM the station
+    need_from_cs = _remaining_energy_need(inst, cs, remaining_route[:H]) + reserve_kwh
+
     if policy == "dynamic":
-        BUFFER_KWH = 0.10  # tune 0.15–0.30
-        target = min(inst.params.battery_kwh, need + BUFFER_KWH)
+        BUFFER_KWH = 0.20
+        target = min(inst.params.battery_kwh, need_from_cs + BUFFER_KWH)
     elif policy == "full":
         target = inst.params.battery_kwh
     elif policy == "fixed":

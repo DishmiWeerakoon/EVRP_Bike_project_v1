@@ -19,7 +19,7 @@ class Params:
     v_mps: float = 6.0
     load_cap_kg: float = 350.0
     battery_kwh: float = 0.6
-    consumption_rate = 0.03  # example: 20 Wh/km
+    consumption_rate = 0.03
     recharge_rate: float = 0.5
 
 @dataclass
